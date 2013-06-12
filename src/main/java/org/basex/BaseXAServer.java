@@ -3,6 +3,7 @@ package org.basex;
 import static org.basex.core.Text.*;
 
 import java.io.*;
+import java.net.*;
 import java.util.*;
 
 import org.basex.core.*;
@@ -93,10 +94,7 @@ public final class BaseXAServer extends Main {
 
       // set up actor system
       system = ActorSystem.create("BaseXServer", parseConfig.withFallback(regularConfig));
-      system.actorOf(LoginActor.mkProps(context), "server");
-
-      Util.outln(CONSOLE + (console ? TRY_MORE_X :
-        Util.info(SRV_STARTED_PORT_X, port)), SERVERMODE);
+      system.actorOf(ServerActor.mkProps(new InetSocketAddress(host, port), context), "server");
 
       if(console) {
         console();

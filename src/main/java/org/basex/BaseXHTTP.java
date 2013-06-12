@@ -139,7 +139,7 @@ public final class BaseXHTTP {
     if(!bool(MainProp.HTTPLOCAL, mprop)) {
       final int port = num(MainProp.SERVERPORT, mprop);
       final int eport = num(MainProp.EVENTPORT, mprop);
-      // TODO BaseXServer.stop(port, eport);
+      BaseXServer.stop(port, eport);
     }
   }
 
