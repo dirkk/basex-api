@@ -354,7 +354,7 @@ public final class HTTPContext {
     }
 
     // start server instance
-    if(!context.mprop.is(MainProp.HTTPLOCAL)) new BaseXServer(context);
+    if(!context.mprop.is(MainProp.HTTPLOCAL)) new BaseXAServer(context);
   }
 
   /**

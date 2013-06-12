@@ -12,6 +12,7 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <project.lib.directory>lib</project.lib.directory>
     <jettyVersion>8.1.6.v20120903</jettyVersion>
+    <akkaVersion>2.2-M3</akkaVersion>
   </properties>
   <licenses>
     <license>
@@ -133,6 +134,27 @@
     	<artifactId>jts</artifactId>
     	<version>1.13</version>
     </dependency>
+    <dependency>
+		    <groupId>com.typesafe.akka</groupId>
+		    <artifactId>akka-actor_2.10</artifactId>
+		    <version>${akkaVersion}</version>
+		</dependency>
+		<dependency>
+		    <groupId>com.typesafe.akka</groupId>
+		    <artifactId>akka-remote_2.10</artifactId>
+		    <version>${akkaVersion}</version>
+		</dependency>
+		<dependency>
+		    <groupId>com.typesafe.akka</groupId>
+		    <artifactId>akka-zeromq_2.10</artifactId>
+		    <version>${akkaVersion}</version>
+		</dependency>
+		<dependency>
+		    <groupId>com.typesafe.akka</groupId>
+		    <artifactId>akka-testkit_2.10</artifactId>
+		    <version>${akkaVersion}</version>
+		    <scope>test</scope>
+		</dependency>
   </dependencies>
   <build>
     <finalName>${project.artifactId}-${project.version}</finalName>
