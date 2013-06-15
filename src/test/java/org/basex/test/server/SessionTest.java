@@ -40,12 +40,8 @@ public abstract class SessionTest extends SandboxTest {
     try {
       if(cleanup) session.execute(new DropDB(NAME));
       session.close();
-      Thread.sleep(500);
     } catch(final IOException ex) {
       fail(Util.message(ex));
-    } catch(InterruptedException e) {
-      // TODO Auto-generated catch block
-      e.printStackTrace();
     }
   }
 
@@ -203,9 +199,9 @@ public abstract class SessionTest extends SandboxTest {
     assertEqual("true", session.query(_DB_IS_RAW.args(NAME, "X")).execute());
     session.store("X", new ArrayInput(""));
     assertEqual("", session.query(_DB_RETRIEVE.args(NAME, "X")).execute());
-    // TODO session.store("X", new ArrayInput(new byte[] { 0, 1, -1 }));
-    //assertEqual("0001FF", session.query(
-    //    "xs:hexBinary(" + _DB_RETRIEVE.args(NAME, "X") + ')').execute());
+    session.store("X", new ArrayInput(new byte[] { 0, 1, -1 }));
+    assertEqual("0001FF", session.query(
+        "xs:hexBinary(" + _DB_RETRIEVE.args(NAME, "X") + ')').execute());
     session.execute("drop db " + NAME);
   }
 

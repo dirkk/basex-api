@@ -31,6 +31,10 @@ public class ServerActor extends UntypedActor {
   private final LoggingAdapter log;
   /** Database context. */
   private final Context dbContext;
+  /** Bound listener. */
+  private ActorRef boundListener;
+  /** Is sucessfully bound. */
+  private boolean bound = false;
 
   /**
    * Create Props for the server actor.
@@ -61,11 +65,19 @@ public class ServerActor extends UntypedActor {
   
   @Override
   public void onReceive(Object msg) throws Exception {
-    if (msg instanceof Bound) {
+    if (msg instanceof String && ((String) msg).equalsIgnoreCase("bound")) {
+      if (bound)
+        getSender().tell(true, getSelf());
+      else
+        boundListener = getSender();
+    } else if (msg instanceof Bound) {
       Bound b = (Bound) msg;
 
       log.info("Server bound to {} ", b.localAddress());
       Util.outln(CONSOLE + Util.info(SRV_STARTED_PORT_X, b.localAddress().getPort()), SERVERMODE);
+      bound = true;
+      if (boundListener != null)
+        boundListener.tell(true, getSelf());
     } else if (msg instanceof CommandFailed) {
       getContext().stop(getSelf());
     } else if (msg instanceof Connected) {

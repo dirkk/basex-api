@@ -41,7 +41,7 @@ public abstract class BaseXServlet extends HttpServlet {
           pass = val;
         }
       }
-    } catch(final IOException ex) {
+    } catch(final Exception ex) {
       throw new ServletException(ex);
     }
   }

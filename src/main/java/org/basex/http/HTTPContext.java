@@ -300,9 +300,9 @@ public final class HTTPContext {
    * Initializes the database context, based on the initial servlet context.
    * Parses all context parameters and passes them on to the database context.
    * @param sc servlet context
-   * @throws IOException I/O exception
+   * @throws Exception I/O exception
    */
-  public static synchronized void init(final ServletContext sc) throws IOException {
+  public static synchronized void init(final ServletContext sc) throws Exception {
     // check if HTTP context has already been initialized
     if(init) return;
     init = true;
@@ -354,7 +354,7 @@ public final class HTTPContext {
     }
 
     // start server instance
-    if(!context.mprop.is(MainProp.HTTPLOCAL)) new BaseXAServer(context);
+    if(!context.mprop.is(MainProp.HTTPLOCAL)) new BaseXServer(context);
   }
 
   /**
