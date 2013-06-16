@@ -38,9 +38,9 @@ public class ClientTest extends TestKit {
   }
   
   /** Start the server. 
-   * @throws IOException I/O exception */
+   * @throws Exception I/O exception */
   @BeforeClass
-  public static void startServer() throws IOException {
+  public static void startServer() throws Exception {
     server = new BaseXServer();
   }
   
