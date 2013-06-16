@@ -1,6 +1,7 @@
 package org.basex.server;
 
 import java.io.*;
+import java.util.*;
 import java.util.concurrent.*;
 
 import org.basex.core.*;
@@ -37,6 +38,11 @@ public class ClientHandler extends UntypedActor {
   private String ts;
   /** Database context. */
   private Context dbContext;
+  /** Query id counter. */
+  private Integer id = 0;
+  /** Active queries. */
+  protected final HashMap<Integer, ActorRef> queries =
+    new HashMap<Integer, ActorRef>();
   
   /**
    * Create Props for the client handler actor.
@@ -53,7 +59,7 @@ public class ClientHandler extends UntypedActor {
    */
   public ClientHandler(final Context ctx) {
     log = Logging.getLogger(getContext().system(), this);
-    dbContext = ctx;
+    dbContext = new Context(ctx, null);
   }
   
   @Override
@@ -61,7 +67,11 @@ public class ClientHandler extends UntypedActor {
     // client is not authenticated
     if (msg instanceof String && ((String) msg).equalsIgnoreCase("connect")) {
       ts = Long.toString(System.nanoTime());
-      getSender().tell(TcpMessage.write(buildMessage(ts, true)), getSelf());
+      ByteStringBuilder bb = new ByteStringBuilder();
+      bb.append(ByteString.fromString(ts));
+      // success
+      bb.putByte((byte) 0);
+      getSender().tell(TcpMessage.write(bb.result()), getSelf());
     } else if (msg instanceof Received) {
       // client sends username + hashed passsword
       ByteString data = ((Received) msg).data();
@@ -126,7 +136,37 @@ public class ClientHandler extends UntypedActor {
           // get the command byte
           ServerCmd sc = ServerCmd.get(reader.getByte());
           if (sc == ServerCmd.CREATE) {
-            create(reader);
+            create(reader.getString(), reader.getInputStream());
+          } else if (sc == ServerCmd.ADD) {
+            add(reader.getString(), reader.getInputStream());
+          } else if (sc == ServerCmd.REPLACE) {
+            replace(reader.getString(), reader.getInputStream());
+          } else if (sc == ServerCmd.STORE) {
+            store(reader.getString(), reader.getInputStream());
+          } else if (sc == ServerCmd.QUERY) {
+            newQuery(msg);
+          } else if (sc == ServerCmd.CLOSE) {
+            int queryId = Integer.decode(reader.getString());
+            if (queries.containsKey(queryId)) {
+              ActorRef query = queries.get(queryId);
+              query.forward(msg, getContext());
+              queries.remove(queryId);
+            } else {
+              ByteStringBuilder bb = new ByteStringBuilder();
+              bb.putByte((byte) 0);
+              bb.putByte((byte) 0);
+              getSender().tell(TcpMessage.write(bb.result()), getSelf());
+            }
+          } else if (sc == ServerCmd.BIND || sc == ServerCmd.CONTEXT ||
+              sc == ServerCmd.ITER || sc == ServerCmd.EXEC || sc == ServerCmd.FULL ||
+              sc == ServerCmd.INFO || sc == ServerCmd.OPTIONS || sc == ServerCmd.UPDATING) {
+            int queryId = Integer.decode(reader.getString());
+            if (queries.containsKey(queryId)) {
+              ActorRef query = queries.get(queryId);
+              query.forward(msg, getContext());
+            } else {
+              throw new IOException("Unknown Query ID: " + queryId);
+            }
           } else if (sc == ServerCmd.COMMAND) {
             reader.decreaseReader();
             command(reader);
@@ -140,16 +180,62 @@ public class ClientHandler extends UntypedActor {
   
   /**
    * Creates a database.
+   * @param name database name
+   * @param input input stream
    * @throws IOException I/O exception
    */
-  protected void create(final Reader reader) throws IOException {
-    execute(new CreateDB(reader.getString()),
-        reader.getNext().iterator().asInputStream());
+  protected void create(final String name, final InputStream input) throws IOException {
+    execute(new CreateDB(name), input);
+  }
+
+  /**
+   * Adds a document to a database.
+   * @param path document path
+   * @param input input stream
+   * @throws IOException I/O exception
+   */
+  protected void add(final String path, final InputStream input) throws IOException {
+    execute(new Add(path), input);
+  }
+
+  /**
+   * Replace a document in a database.
+   * @param path document path
+   * @param input input stream
+   * @throws IOException I/O exception
+   */
+  protected void replace(final String path, final InputStream input) throws IOException {
+    execute(new Replace(path), input);
+  }
+
+  /**
+   * Stores raw data in a database.
+   * @param path document path
+   * @param input input stream
+   * @throws IOException I/O exception
+   */
+  protected void store(final String path, final InputStream input) throws IOException {
+    execute(new Store(path), input);
+  }
+  
+  /**
+   * Creates a new query.
+   * @param msg message
+   */
+  protected void newQuery(final Object msg) {
+    int newId;
+    synchronized (id) {
+      newId = id++;
+    }
+    ActorRef query = getContext().actorOf(QueryHandler.mkProps(dbContext, newId));
+    queries.put(newId, query);
+    query.forward(msg, getContext());
   }
   
   /**
    * Executes the specified command.
    * @param cmd command to be executed
+   * @param input encoded input stream
    * @throws IOException I/O exception
    */
   protected void execute(final Command cmd, final InputStream input) throws IOException {
@@ -158,10 +244,10 @@ public class ClientHandler extends UntypedActor {
     try {
       cmd.setInput(di);
       cmd.execute(dbContext);
-      getSender().tell(TcpMessage.write(buildMessage(cmd.info(), true)), getSelf());
+      getSender().tell(TcpMessage.write(buildInfo(cmd.info(), true)), getSelf());
     } catch(final BaseXException ex) {
       di.flush();
-      getSender().tell(TcpMessage.write(buildMessage(ex.getMessage(), true)), getSelf());
+      getSender().tell(TcpMessage.write(buildInfo(ex.getMessage(), false)), getSelf());
     }
   }
   
@@ -176,9 +262,10 @@ public class ClientHandler extends UntypedActor {
     } catch(final QueryException ex) {
       // log invalid command
       final String msg = ex.getMessage();
-      log.info(cmd);
-      log.info(msg);
+      log.info("Query failed: {}, Error message: {}", cmd, msg);
+      
       ByteStringBuilder bb = new ByteStringBuilder();
+      bb.putByte((byte) 0);
       bb.append(buildInfo(msg, false));
       getSender().tell(TcpMessage.write(bb.result()), getSelf());
       return;
@@ -212,6 +299,18 @@ public class ClientHandler extends UntypedActor {
     getContext().stop(getSelf());
   }
   
+  /**
+   * Build an outgoing info message.
+   * Is in the format:
+   * <ul>
+   *   <li> info string </li>
+   *   <li> 0 byte </li>
+   *   <li> success: 0 byte, failed: 1 byte</li>
+   * </ul>
+   * @param info info string
+   * @param success success or failed
+   * @return composed message
+   */
   protected ByteString buildInfo(final String info, final boolean success) {
     ByteStringBuilder bb = new ByteStringBuilder();
     bb.append(ByteString.fromString(info));
@@ -219,19 +318,4 @@ public class ClientHandler extends UntypedActor {
     bb.putByte((byte) (success ? 0 : 1));
     return bb.result();
   }
-  
-  /**
-   * Build a message to send over the wire, consisting of a string, followed
-   * by either a 0 byte (success) or 1 byte (failed)
-   * @param out string to write
-   * @param success success flag
-   * @return byte string
-   */
-  private ByteString buildMessage(final String out, final boolean success) {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.append(ByteString.fromString(out));
-    bb.putByte((byte) (success ? 0 : 1));
-    return bb.result();
-  }
-  
 }
