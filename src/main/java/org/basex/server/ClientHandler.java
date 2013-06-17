@@ -69,11 +69,9 @@ public class ClientHandler extends UntypedActor {
     // client is not authenticated
     if (msg instanceof String && ((String) msg).equalsIgnoreCase("connect")) {
       ts = Long.toString(System.nanoTime());
-      ByteStringBuilder bb = new ByteStringBuilder();
-      bb.append(ByteString.fromString(ts));
-      // success
-      bb.putByte((byte) 0);
-      getSender().tell(TcpMessage.write(bb.result()), getSelf());
+      Writer w = new Writer();
+      w.writeString(ts);
+      w.send(getSender(), getSelf());
     } else if (msg instanceof Received) {
       // client sends username + hashed passsword
       ByteString data = ((Received) msg).data();
@@ -86,9 +84,9 @@ public class ClientHandler extends UntypedActor {
         log.info("Authentification successful for user {}", dbContext.user);
 
         // send successful response message
-        ByteStringBuilder bb = new ByteStringBuilder();
-        bb.putByte((byte) 0);
-        getSender().tell(TcpMessage.write(bb.result()), getSelf());
+        Writer w = new Writer();
+        w.writeTerminator();
+        w.send(getSender(), getSelf());
         
         // change incoming message processing
         getContext().become(authenticated());
@@ -96,30 +94,13 @@ public class ClientHandler extends UntypedActor {
         log.info("Access denied for user {}", dbContext.user);
         
         // send authentication denied message with 1s delay
-        ByteStringBuilder bb = new ByteStringBuilder();
-        bb.putByte((byte) 1);
-        sendDelayed(TcpMessage.write(bb.result()), getSender(), Duration.create(1, TimeUnit.SECONDS));
+        Writer w = new Writer();
+        w.writeSuccess(false);
+        w.sendDelayed(getSender(), getSelf(), getContext().system(), Duration.create(1, TimeUnit.SECONDS));
       }
     } else if (msg instanceof ConnectionClosed) {
       connectionClosed((ConnectionClosed) msg);
     }
-  }
-  
-  /**
-   * Send a message once to another actor with a certain amount of delay before
-   * sending.
-   * @param msg message
-   * @param dest destination actor to send to
-   * @param duration time to wait before sending
-   */
-  protected void sendDelayed(Object msg, ActorRef dest, FiniteDuration duration) {
-    getContext().system().scheduler().scheduleOnce(
-        duration,
-        dest,
-        msg,
-        getContext().system().dispatcher(),
-        getSelf()
-    );
   }
   
   /**
@@ -146,9 +127,9 @@ public class ClientHandler extends UntypedActor {
           } else if (sc == ServerCmd.STORE) {
             store(reader.getString(), reader.getInputStream());
           } else if (sc == ServerCmd.WATCH) {
-            watch(reader.getString());
+            //watch(reader.getString());
           } else if (sc == ServerCmd.UNWATCH) {
-            unwatch(reader.getString());
+            //unwatch(reader.getString());
           } else if (sc == ServerCmd.QUERY) {
             newQuery(msg);
           } else if (sc == ServerCmd.CLOSE) {
@@ -228,66 +209,66 @@ public class ClientHandler extends UntypedActor {
    * Watches an event.
    * @throws IOException I/O exception
    */
-  private void watch(Object msg) throws IOException {
-    ActorRef e;
-    if (getContext().child("events") == null) {
-      e = getContext().actorOf(EventActor.mkProps(), "events");
-    } else {
-      e = getContext().getChild("events");
-    }
-    e.forward(msg, getContext());
-    
-    if(!addressSend) {
-      ByteStringBuilder bb = new ByteStringBuilder();
-      bb.append(ByteString.fromString(Integer.toString(addr.getPort())));
-      bb.putByte((byte) 0);
-      bb.append(ByteString.fromString(Long.toString(0)));
-      bb.putByte((byte) 0);
-
-      getSender().tell(TcpMessage.write(bb.result()), getSelf());
-      addressSend = true;
-    }
-
-    final Sessions s = dbContext.events.get(name);
-    final boolean ok = s != null && !s.contains(this);
-    final String message;
-    if(ok) {
-      s.add(null);
-      message = WATCHING_EVENT_X;
-    } else if(s == null) {
-      message = EVENT_UNKNOWN_X;
-    } else {
-      message = EVENT_WATCHED_X;
-    }
-    
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.append(ByteString.fromString(message));
-    bb.putByte((byte) 0);
-    bb.putByte((byte) (ok ? 0 : 1));
-    getSender().tell(TcpMessage.write(bb.result()), getSelf());
-  }
+//  private void watch(Object msg) throws IOException {
+//    ActorRef e;
+//    if (getContext().child("events") == null) {
+//      e = getContext().actorOf(EventActor.mkProps(), "events");
+//    } else {
+//      e = getContext().getChild("events");
+//    }
+//    e.forward(msg, getContext());
+//    
+//    if(!addressSend) {
+//      ByteStringBuilder bb = new ByteStringBuilder();
+//      bb.append(ByteString.fromString(Integer.toString(addr.getPort())));
+//      bb.putByte((byte) 0);
+//      bb.append(ByteString.fromString(Long.toString(0)));
+//      bb.putByte((byte) 0);
+//
+//      getSender().tell(TcpMessage.write(bb.result()), getSelf());
+//      addressSend = true;
+//    }
+//
+//    final Sessions s = dbContext.events.get(name);
+//    final boolean ok = s != null && !s.contains(this);
+//    final String message;
+//    if(ok) {
+//      s.add(null);
+//      message = WATCHING_EVENT_X;
+//    } else if(s == null) {
+//      message = EVENT_UNKNOWN_X;
+//    } else {
+//      message = EVENT_WATCHED_X;
+//    }
+//    
+//    ByteStringBuilder bb = new ByteStringBuilder();
+//    bb.append(ByteString.fromString(message));
+//    bb.putByte((byte) 0);
+//    bb.putByte((byte) (ok ? 0 : 1));
+//    getSender().tell(TcpMessage.write(bb.result()), getSelf());
+//  }
 
   /**
    * Unwatches an event.
    * @throws IOException I/O exception
    */
-  private void unwatch() throws IOException {
-    final String name = in.readString();
-
-    final Sessions s = context.events.get(name);
-    final boolean ok = s != null && s.contains(this);
-    final String message;
-    if(ok) {
-      s.remove(this);
-      message = UNWATCHING_EVENT_X;
-    } else if(s == null) {
-      message = EVENT_UNKNOWN_X;
-    } else {
-      message = EVENT_NOT_WATCHED_X;
-    }
-    info(Util.info(message, name), ok);
-    out.flush();
-  }
+//  private void unwatch() throws IOException {
+//    final String name = in.readString();
+//
+//    final Sessions s = context.events.get(name);
+//    final boolean ok = s != null && s.contains(this);
+//    final String message;
+//    if(ok) {
+//      s.remove(this);
+//      message = UNWATCHING_EVENT_X;
+//    } else if(s == null) {
+//      message = EVENT_UNKNOWN_X;
+//    } else {
+//      message = EVENT_NOT_WATCHED_X;
+//    }
+//    info(Util.info(message, name), ok);
+//    out.flush();
+//  }
   
   /**
    * Creates a new query.
@@ -315,13 +296,20 @@ public class ClientHandler extends UntypedActor {
     try {
       cmd.setInput(di);
       cmd.execute(dbContext);
-      getSender().tell(TcpMessage.write(buildInfo(cmd.info(), true)), getSelf());
+      Writer w = new Writer();
+      w.writeString(cmd.info());
+      w.writeSuccess(true);
+      w.send(getSender(), getSelf());
     } catch(final BaseXException ex) {
       di.flush();
-      getSender().tell(TcpMessage.write(buildInfo(ex.getMessage(), false)), getSelf());
+
+      Writer w = new Writer();
+      w.writeString(ex.getMessage());
+      w.writeSuccess(false);
+      w.send(getSender(), getSelf());
     }
   }
-  
+
   protected void command(final Reader reader) {
     Command command;
     String cmd = reader.getString();
@@ -335,31 +323,34 @@ public class ClientHandler extends UntypedActor {
       final String msg = ex.getMessage();
       log.info("Query failed: {}, Error message: {}", cmd, msg);
       
-      ByteStringBuilder bb = new ByteStringBuilder();
-      bb.putByte((byte) 0);
-      bb.append(buildInfo(msg, false));
-      getSender().tell(TcpMessage.write(bb.result()), getSelf());
+      Writer w = new Writer();
+      w.writeTerminator();
+      w.writeString(msg);
+      w.writeSuccess(false);
+      w.send(getSender(), getSelf());
       return;
     }
 
     // execute command and send {RESULT}
     String info;
-    ByteStringBuilder bb = new ByteStringBuilder();
+    Writer w = new Writer();
     try {
       // run command
-      command.execute(dbContext, new EncodingOutput(bb.asOutputStream()));
+      command.execute(dbContext, new EncodingOutput(w.getOutputStream()));
       info = command.info();
 
-      bb.putByte((byte) 0);
-      bb.append(buildInfo(info, true));
+      w.writeTerminator();
+      w.writeString(info);
+      w.writeSuccess(true);
     } catch(final BaseXException ex) {
       info = ex.getMessage();
       if(info.startsWith(INTERRUPTED)) info = TIMEOUT_EXCEEDED;
 
-      bb.putByte((byte) 0);
-      bb.append(buildInfo(info, false));
+      w.writeTerminator();
+      w.writeString(info);
+      w.writeSuccess(false);
     }
-    getSender().tell(TcpMessage.write(bb.result()), getSelf());
+    w.send(getSender(), getSelf());
   }
   
   /**
@@ -368,25 +359,5 @@ public class ClientHandler extends UntypedActor {
    */
   protected void connectionClosed(final ConnectionClosed msg) {
     getContext().stop(getSelf());
-  }
-  
-  /**
-   * Build an outgoing info message.
-   * Is in the format:
-   * <ul>
-   *   <li> info string </li>
-   *   <li> 0 byte </li>
-   *   <li> success: 0 byte, failed: 1 byte</li>
-   * </ul>
-   * @param info info string
-   * @param success success or failed
-   * @return composed message
-   */
-  protected ByteString buildInfo(final String info, final boolean success) {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.append(ByteString.fromString(info));
-    bb.putByte((byte) 0);
-    bb.putByte((byte) (success ? 0 : 1));
-    return bb.result();
   }
 }
