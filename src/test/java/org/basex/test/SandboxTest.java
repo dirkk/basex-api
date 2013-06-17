@@ -75,9 +75,9 @@ public abstract class SandboxTest {
    * Creates a new, sandboxed server instance.
    * @param args additional arguments
    * @return server instance
-   * @throws Exception I/O exception
+   * @throws IOException I/O exception
    */
-  protected static BaseXServer createServer(final String... args) throws Exception {
+  protected static BaseXServer createServer(final String... args) throws IOException {
     try {
       System.setOut(NULL);
       final StringList sl = new StringList().add("-z").add("-p9999").add("-e9998");

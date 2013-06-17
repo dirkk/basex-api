@@ -55,9 +55,9 @@ public final class BaseXServer extends Main {
   /**
    * Constructor.
    * @param args command-line arguments
-   * @throws Exception I/O exception
+   * @throws IOException I/O exception
    */
-  public BaseXServer(final String... args) throws Exception {
+  public BaseXServer(final String... args) throws IOException {
     this(null, args);
   }
 
@@ -65,9 +65,9 @@ public final class BaseXServer extends Main {
    * Constructor.
    * @param ctx database context
    * @param args command-line arguments
-   * @throws Exception I/O exception
+   * @throws IOException I/O exception
    */
-  public BaseXServer(final Context ctx, final String... args) throws Exception {
+  public BaseXServer(final Context ctx, final String... args) throws IOException {
     super(args, ctx);
     
     final MainProp mprop = context.mprop;
@@ -112,7 +112,7 @@ public final class BaseXServer extends Main {
       }
     } catch(final Exception ex) {
       context.log.writeError(ex);
-      throw ex;
+      throw new IOException(ex);
     }
   }
 

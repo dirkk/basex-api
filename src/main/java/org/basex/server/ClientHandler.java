@@ -358,6 +358,7 @@ public class ClientHandler extends UntypedActor {
    * @param msg closing message
    */
   protected void connectionClosed(final ConnectionClosed msg) {
+    log.info("TCP connection was closed. Error Cause: {}", msg.getErrorCause());
     getContext().stop(getSelf());
   }
 }

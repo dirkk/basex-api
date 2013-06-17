@@ -26,19 +26,18 @@ public final class AdminStressTest extends SandboxTest {
 
   /**
    * Starts the server.
-   * @throws Exception I/O exception
+   * @throws IOException I/O exception
    */
   @BeforeClass
-  public static void start() throws Exception {
+  public static void start() throws IOException {
     server = createServer();
   }
 
   /**
    * Stops the server.
-   * @throws IOException I/O exception
    */
   @AfterClass
-  public static void stop() throws IOException {
+  public static void stop() {
     stopServer(server);
   }
 

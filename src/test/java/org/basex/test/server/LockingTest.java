@@ -2,7 +2,6 @@ package org.basex.test.server;
 
 import static org.junit.Assert.*;
 
-import java.io.*;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
@@ -86,10 +85,9 @@ public final class LockingTest extends SandboxTest {
 
   /**
    * Stops the server.
-   * @throws IOException I/O exception
    */
   @AfterClass
-  public static void stop() throws IOException {
+  public static void stop() {
     stopServer(server);
   }
 
