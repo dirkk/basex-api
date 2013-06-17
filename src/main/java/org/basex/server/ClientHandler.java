@@ -127,9 +127,9 @@ public class ClientHandler extends UntypedActor {
           } else if (sc == ServerCmd.STORE) {
             store(reader.getString(), reader.getInputStream());
           } else if (sc == ServerCmd.WATCH) {
-            //watch(reader.getString());
+            watch(reader.getString());
           } else if (sc == ServerCmd.UNWATCH) {
-            //unwatch(reader.getString());
+            unwatch(reader.getString());
           } else if (sc == ServerCmd.QUERY) {
             newQuery(msg);
           } else if (sc == ServerCmd.CLOSE) {
@@ -207,68 +207,56 @@ public class ClientHandler extends UntypedActor {
   
   /**
    * Watches an event.
-   * @throws IOException I/O exception
+   * @param name event name
    */
-//  private void watch(Object msg) throws IOException {
-//    ActorRef e;
-//    if (getContext().child("events") == null) {
-//      e = getContext().actorOf(EventActor.mkProps(), "events");
-//    } else {
-//      e = getContext().getChild("events");
-//    }
-//    e.forward(msg, getContext());
-//    
-//    if(!addressSend) {
-//      ByteStringBuilder bb = new ByteStringBuilder();
-//      bb.append(ByteString.fromString(Integer.toString(addr.getPort())));
-//      bb.putByte((byte) 0);
-//      bb.append(ByteString.fromString(Long.toString(0)));
-//      bb.putByte((byte) 0);
-//
-//      getSender().tell(TcpMessage.write(bb.result()), getSelf());
-//      addressSend = true;
-//    }
-//
-//    final Sessions s = dbContext.events.get(name);
-//    final boolean ok = s != null && !s.contains(this);
-//    final String message;
-//    if(ok) {
-//      s.add(null);
-//      message = WATCHING_EVENT_X;
-//    } else if(s == null) {
-//      message = EVENT_UNKNOWN_X;
-//    } else {
-//      message = EVENT_WATCHED_X;
-//    }
-//    
-//    ByteStringBuilder bb = new ByteStringBuilder();
-//    bb.append(ByteString.fromString(message));
-//    bb.putByte((byte) 0);
-//    bb.putByte((byte) (ok ? 0 : 1));
-//    getSender().tell(TcpMessage.write(bb.result()), getSelf());
-//  }
+  protected void watch(final String name) {
+    if(!addressSend) {
+      Writer w = new Writer();
+      w.writeString(Integer.toString(dbContext.mprop.num(dbContext.mprop.EVENTPORT)));
+      w.writeString(getSelf().path().name());
+      w.send(getSender(), getSelf());
+      addressSend = true;
+    }
+
+    final Sessions s = dbContext.events.get(name);
+    final boolean ok = s != null && !s.contains(this);
+    final String message;
+    if(ok) {
+      s.add(null);
+      message = WATCHING_EVENT_X;
+    } else if(s == null) {
+      message = EVENT_UNKNOWN_X;
+    } else {
+      message = EVENT_WATCHED_X;
+    }
+    
+    Writer w = new Writer();
+    w.writeString(message);
+    w.writeSuccess(ok);
+    w.send(getSender(), getSelf());
+  }
 
   /**
    * Unwatches an event.
-   * @throws IOException I/O exception
+   * @param name event name
    */
-//  private void unwatch() throws IOException {
-//    final String name = in.readString();
-//
-//    final Sessions s = context.events.get(name);
-//    final boolean ok = s != null && s.contains(this);
-//    final String message;
-//    if(ok) {
-//      s.remove(this);
-//      message = UNWATCHING_EVENT_X;
-//    } else if(s == null) {
-//      message = EVENT_UNKNOWN_X;
-//    } else {
-//      message = EVENT_NOT_WATCHED_X;
-//    }
-//    info(Util.info(message, name), ok);
-//    out.flush();
-//  }
+  protected void unwatch(final String name) {
+    final Sessions s = dbContext.events.get(name);
+    final boolean ok = s != null && s.contains(this);
+    final String message;
+    if(ok) {
+      s.remove(this);
+      message = UNWATCHING_EVENT_X;
+    } else if(s == null) {
+      message = EVENT_UNKNOWN_X;
+    } else {
+      message = EVENT_NOT_WATCHED_X;
+    }
+    Writer w = new Writer();
+    w.writeString(message + name);
+    w.writeSuccess(ok);
+    w.send(getSender(), getSelf());
+  }
   
   /**
    * Creates a new query.
