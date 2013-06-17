@@ -17,7 +17,6 @@ import akka.actor.*;
 import akka.event.*;
 import akka.io.Tcp.ConnectionClosed;
 import akka.io.Tcp.Received;
-import akka.io.*;
 import akka.japi.*;
 import akka.util.*;
 
@@ -33,18 +32,24 @@ import static org.basex.core.Text.*;
  */
 public class ClientHandler extends UntypedActor {
   /** Logging adapter. */
-  private final LoggingAdapter log;
+  protected final LoggingAdapter log;
   /** Authentification timestamp. */
-  private String ts;
+  protected String ts;
   /** Database context. */
-  private Context dbContext;
+  protected Context dbContext;
   /** Query id counter. */
-  private Integer id = 0;
+  protected Integer id = 0;
   /** Active queries. */
   protected final HashMap<Integer, ActorRef> queries =
     new HashMap<Integer, ActorRef>();
   /** Event Socket address already sent? */
-  private boolean addressSend = false;
+  protected boolean addressSend = false;
+  /** Waiting for a WATCH command. Stateful protocol. */
+  protected boolean watchCommand = false;
+  /** Event handling actor. */
+  protected ActorRef event;
+  /** Interface for core. */
+  protected ClientListener lst;
   
   /**
    * Create Props for the client handler actor.
@@ -62,6 +67,7 @@ public class ClientHandler extends UntypedActor {
   public ClientHandler(final Context ctx) {
     log = Logging.getLogger(getContext().system(), this);
     dbContext = new Context(ctx, null);
+    lst = new ClientListener(dbContext, null);
   }
   
   @Override
@@ -114,48 +120,57 @@ public class ClientHandler extends UntypedActor {
           Received recv = (Received) msg;
           Reader reader = new Reader(recv.data());
           
-          // get the command byte
-          ServerCmd sc = ServerCmd.get(reader.getByte());
-          if (sc == ServerCmd.CREATE) {
-            create(reader.getString(), reader.getInputStream());
-          } else if (sc == ServerCmd.ADD) {
-            add(reader.getString(), reader.getInputStream());
-          } else if (sc == ServerCmd.REPLACE) {
-            replace(reader.getString(), reader.getInputStream());
-          } else if (sc == ServerCmd.STORE) {
-            store(reader.getString(), reader.getInputStream());
-          } else if (sc == ServerCmd.WATCH) {
+          if (watchCommand) {
             watch(reader.getString());
-          } else if (sc == ServerCmd.UNWATCH) {
-            unwatch(reader.getString());
-          } else if (sc == ServerCmd.QUERY) {
-            newQuery(msg);
-          } else if (sc == ServerCmd.CLOSE) {
-            int queryId = Integer.decode(reader.getString());
-            if (queries.containsKey(queryId)) {
-              ActorRef query = queries.get(queryId);
-              query.forward(msg, getContext());
-              queries.remove(queryId);
-            } else {
-              new Writer().writeTerminator().writeTerminator()
-                .send(getSender(), getSelf());
+            watchCommand = false;
+          } else {
+            // get the command byte
+            ServerCmd sc = ServerCmd.get(reader.getByte());
+            if (sc == ServerCmd.CREATE) {
+              create(reader.getString(), reader.getInputStream());
+            } else if (sc == ServerCmd.ADD) {
+              add(reader.getString(), reader.getInputStream());
+            } else if (sc == ServerCmd.REPLACE) {
+              replace(reader.getString(), reader.getInputStream());
+            } else if (sc == ServerCmd.STORE) {
+              store(reader.getString(), reader.getInputStream());
+            } else if (sc == ServerCmd.WATCH) {
+              watch(reader.getString());
+            } else if (sc == ServerCmd.UNWATCH) {
+              unwatch(reader.getString());
+            } else if (sc == ServerCmd.QUERY) {
+              newQuery(msg);
+            } else if (sc == ServerCmd.CLOSE) {
+              int queryId = Integer.decode(reader.getString());
+              if (queries.containsKey(queryId)) {
+                ActorRef query = queries.get(queryId);
+                query.forward(msg, getContext());
+                queries.remove(queryId);
+              } else {
+                new Writer().writeTerminator().writeTerminator()
+                  .send(getSender(), getSelf());
+              }
+            } else if (sc == ServerCmd.BIND || sc == ServerCmd.CONTEXT ||
+                sc == ServerCmd.ITER || sc == ServerCmd.EXEC || sc == ServerCmd.FULL ||
+                sc == ServerCmd.INFO || sc == ServerCmd.OPTIONS || sc == ServerCmd.UPDATING) {
+              int queryId = Integer.decode(reader.getString());
+              if (queries.containsKey(queryId)) {
+                ActorRef query = queries.get(queryId);
+                query.forward(msg, getContext());
+              } else {
+                throw new IOException("Unknown Query ID: " + queryId);
+              }
+            } else if (sc == ServerCmd.COMMAND) {
+              reader.decreaseReader();
+              command(reader);
             }
-          } else if (sc == ServerCmd.BIND || sc == ServerCmd.CONTEXT ||
-              sc == ServerCmd.ITER || sc == ServerCmd.EXEC || sc == ServerCmd.FULL ||
-              sc == ServerCmd.INFO || sc == ServerCmd.OPTIONS || sc == ServerCmd.UPDATING) {
-            int queryId = Integer.decode(reader.getString());
-            if (queries.containsKey(queryId)) {
-              ActorRef query = queries.get(queryId);
-              query.forward(msg, getContext());
-            } else {
-              throw new IOException("Unknown Query ID: " + queryId);
-            }
-          } else if (sc == ServerCmd.COMMAND) {
-            reader.decreaseReader();
-            command(reader);
           }
         } else if (msg instanceof ConnectionClosed) {
           connectionClosed((ConnectionClosed) msg);
+        } else if (msg instanceof ActorRef) {
+          register((ActorRef) msg);
+        } else {
+          unhandled(msg);
         }
       }
     };
@@ -200,7 +215,7 @@ public class ClientHandler extends UntypedActor {
   protected void store(final String path, final InputStream input) throws IOException {
     execute(new Store(path), input);
   }
-  
+
   /**
    * Watches an event.
    * @param name event name
@@ -212,21 +227,23 @@ public class ClientHandler extends UntypedActor {
         .writeString(getSelf().path().name())
         .send(getSender(), getSelf());
       addressSend = true;
-    }
-
-    final Sessions s = dbContext.events.get(name);
-    final boolean ok = s != null && !s.contains(this);
-    final String message;
-    if(ok) {
-      s.add(null);
-      message = WATCHING_EVENT_X;
-    } else if(s == null) {
-      message = EVENT_UNKNOWN_X;
+      watchCommand = true;
     } else {
-      message = EVENT_WATCHED_X;
+      final Sessions s = dbContext.events.get(name);
+      final boolean ok = s != null && !s.contains(this);
+      final String message;
+      if(ok) {
+        if (lst == null) lst = new ClientListener(dbContext, null);
+        s.add(lst);
+        message = WATCHING_EVENT_X;
+      } else if(s == null) {
+        message = EVENT_UNKNOWN_X;
+      } else {
+        message = EVENT_WATCHED_X;
+      }
+  
+      new Writer().writeString(message).writeSuccess(ok).send(getSender(), getSelf());
     }
-    
-    new Writer().writeString(message).writeSuccess(ok).send(getSender(), getSelf());
   }
 
   /**
@@ -235,10 +252,10 @@ public class ClientHandler extends UntypedActor {
    */
   protected void unwatch(final String name) {
     final Sessions s = dbContext.events.get(name);
-    final boolean ok = s != null && s.contains(this);
+    final boolean ok = s != null && s.contains(lst);
     final String message;
     if(ok) {
-      s.remove(this);
+      s.remove(lst);
       message = UNWATCHING_EVENT_X;
     } else if(s == null) {
       message = EVENT_UNKNOWN_X;
@@ -319,6 +336,16 @@ public class ClientHandler extends UntypedActor {
     w.send(getSender(), getSelf());
   }
   
+  /**
+   * Registers an event actor
+   * @param eventActor register this actor
+   */
+  protected void register(final ActorRef eventActor) {
+    event = eventActor;
+    log.info("Event registered");
+    
+    new Writer().writeTerminator().send(getSender(), getSelf());
+  }
   /**
    * The TCP socket connection was closed.
    * @param msg closing message

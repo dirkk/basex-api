@@ -243,15 +243,11 @@ public final class HTTPContext {
    */
   public LocalSession session() throws IOException {
     if(session == null) {
-      final byte[] address = token(req.getRemoteAddr());
       try {
         if(user == null || user.isEmpty() || pass == null || pass.isEmpty())
           throw new LoginException(NOPASSWD);
         session = new LocalSession(context(), user, pass);
-        context.blocker.remove(address);
       } catch(final LoginException ex) {
-        // delay users with wrong passwords
-        for(int d = context.blocker.delay(address); d > 0; d--) Performance.sleep(1000);
         throw ex;
       }
     }

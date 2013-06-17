@@ -12,6 +12,7 @@ import akka.io.*;
 import akka.io.Tcp.Bound;
 import akka.io.Tcp.CommandFailed;
 import akka.io.Tcp.Connected;
+import akka.io.Tcp.Received;
 
 public class EventActor extends UntypedActor {
   /** Listening address. */
@@ -46,7 +47,6 @@ public class EventActor extends UntypedActor {
   public void onReceive(Object msg) throws Exception {
     if (msg instanceof Bound) {
       Bound b = (Bound) msg;
-
       log.info("Event Server bound to {} ", b.localAddress());
       Util.outln(CONSOLE + Util.info(SRV_STARTED_PORT_X, b.localAddress().getPort()), SERVERMODE);
     } else if (msg instanceof CommandFailed) {
@@ -54,6 +54,8 @@ public class EventActor extends UntypedActor {
     } else if (msg instanceof Connected) {
       final Connected conn = (Connected) msg;
       log.info("Connection from {}", conn.remoteAddress());
+      final ActorRef handler = getContext().actorOf(EventHandler.mkProps());
+      getSender().tell(TcpMessage.register(handler), getSelf());
     }
   }
 }
