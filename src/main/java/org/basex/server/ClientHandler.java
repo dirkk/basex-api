@@ -43,6 +43,8 @@ public class ClientHandler extends UntypedActor {
   /** Active queries. */
   protected final HashMap<Integer, ActorRef> queries =
     new HashMap<Integer, ActorRef>();
+  /** Event Socket address already sent? */
+  private boolean addressSend = false;
   
   /**
    * Create Props for the client handler actor.
@@ -143,6 +145,10 @@ public class ClientHandler extends UntypedActor {
             replace(reader.getString(), reader.getInputStream());
           } else if (sc == ServerCmd.STORE) {
             store(reader.getString(), reader.getInputStream());
+          } else if (sc == ServerCmd.WATCH) {
+            watch(reader.getString());
+          } else if (sc == ServerCmd.UNWATCH) {
+            unwatch(reader.getString());
           } else if (sc == ServerCmd.QUERY) {
             newQuery(msg);
           } else if (sc == ServerCmd.CLOSE) {
@@ -216,6 +222,71 @@ public class ClientHandler extends UntypedActor {
    */
   protected void store(final String path, final InputStream input) throws IOException {
     execute(new Store(path), input);
+  }
+  
+  /**
+   * Watches an event.
+   * @throws IOException I/O exception
+   */
+  private void watch(Object msg) throws IOException {
+    ActorRef e;
+    if (getContext().child("events") == null) {
+      e = getContext().actorOf(EventActor.mkProps(), "events");
+    } else {
+      e = getContext().getChild("events");
+    }
+    e.forward(msg, getContext());
+    
+    if(!addressSend) {
+      ByteStringBuilder bb = new ByteStringBuilder();
+      bb.append(ByteString.fromString(Integer.toString(addr.getPort())));
+      bb.putByte((byte) 0);
+      bb.append(ByteString.fromString(Long.toString(0)));
+      bb.putByte((byte) 0);
+
+      getSender().tell(TcpMessage.write(bb.result()), getSelf());
+      addressSend = true;
+    }
+
+    final Sessions s = dbContext.events.get(name);
+    final boolean ok = s != null && !s.contains(this);
+    final String message;
+    if(ok) {
+      s.add(null);
+      message = WATCHING_EVENT_X;
+    } else if(s == null) {
+      message = EVENT_UNKNOWN_X;
+    } else {
+      message = EVENT_WATCHED_X;
+    }
+    
+    ByteStringBuilder bb = new ByteStringBuilder();
+    bb.append(ByteString.fromString(message));
+    bb.putByte((byte) 0);
+    bb.putByte((byte) (ok ? 0 : 1));
+    getSender().tell(TcpMessage.write(bb.result()), getSelf());
+  }
+
+  /**
+   * Unwatches an event.
+   * @throws IOException I/O exception
+   */
+  private void unwatch() throws IOException {
+    final String name = in.readString();
+
+    final Sessions s = context.events.get(name);
+    final boolean ok = s != null && s.contains(this);
+    final String message;
+    if(ok) {
+      s.remove(this);
+      message = UNWATCHING_EVENT_X;
+    } else if(s == null) {
+      message = EVENT_UNKNOWN_X;
+    } else {
+      message = EVENT_NOT_WATCHED_X;
+    }
+    info(Util.info(message, name), ok);
+    out.flush();
   }
   
   /**
