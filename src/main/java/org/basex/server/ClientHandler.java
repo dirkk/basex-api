@@ -69,9 +69,9 @@ public class ClientHandler extends UntypedActor {
     // client is not authenticated
     if (msg instanceof String && ((String) msg).equalsIgnoreCase("connect")) {
       ts = Long.toString(System.nanoTime());
-      Writer w = new Writer();
-      w.writeString(ts);
-      w.send(getSender(), getSelf());
+      new Writer()
+        .writeString(ts)
+        .send(getSender(), getSelf());
     } else if (msg instanceof Received) {
       // client sends username + hashed passsword
       ByteString data = ((Received) msg).data();
@@ -84,9 +84,7 @@ public class ClientHandler extends UntypedActor {
         log.info("Authentification successful for user {}", dbContext.user);
 
         // send successful response message
-        Writer w = new Writer();
-        w.writeTerminator();
-        w.send(getSender(), getSelf());
+        new Writer().writeTerminator().send(getSender(), getSelf());
         
         // change incoming message processing
         getContext().become(authenticated());
@@ -94,9 +92,9 @@ public class ClientHandler extends UntypedActor {
         log.info("Access denied for user {}", dbContext.user);
         
         // send authentication denied message with 1s delay
-        Writer w = new Writer();
-        w.writeSuccess(false);
-        w.sendDelayed(getSender(), getSelf(), getContext().system(), Duration.create(1, TimeUnit.SECONDS));
+        new Writer()
+          .writeSuccess(false)
+          .sendDelayed(getSender(), getSelf(), getContext().system(), Duration.create(1, TimeUnit.SECONDS));
       }
     } else if (msg instanceof ConnectionClosed) {
       connectionClosed((ConnectionClosed) msg);
@@ -139,10 +137,8 @@ public class ClientHandler extends UntypedActor {
               query.forward(msg, getContext());
               queries.remove(queryId);
             } else {
-              ByteStringBuilder bb = new ByteStringBuilder();
-              bb.putByte((byte) 0);
-              bb.putByte((byte) 0);
-              getSender().tell(TcpMessage.write(bb.result()), getSelf());
+              new Writer().writeTerminator().writeTerminator()
+                .send(getSender(), getSelf());
             }
           } else if (sc == ServerCmd.BIND || sc == ServerCmd.CONTEXT ||
               sc == ServerCmd.ITER || sc == ServerCmd.EXEC || sc == ServerCmd.FULL ||
@@ -211,10 +207,10 @@ public class ClientHandler extends UntypedActor {
    */
   protected void watch(final String name) {
     if(!addressSend) {
-      Writer w = new Writer();
-      w.writeString(Integer.toString(dbContext.mprop.num(dbContext.mprop.EVENTPORT)));
-      w.writeString(getSelf().path().name());
-      w.send(getSender(), getSelf());
+      new Writer()
+        .writeString(Integer.toString(dbContext.mprop.num(dbContext.mprop.EVENTPORT)))
+        .writeString(getSelf().path().name())
+        .send(getSender(), getSelf());
       addressSend = true;
     }
 
@@ -230,10 +226,7 @@ public class ClientHandler extends UntypedActor {
       message = EVENT_WATCHED_X;
     }
     
-    Writer w = new Writer();
-    w.writeString(message);
-    w.writeSuccess(ok);
-    w.send(getSender(), getSelf());
+    new Writer().writeString(message).writeSuccess(ok).send(getSender(), getSelf());
   }
 
   /**
@@ -252,10 +245,8 @@ public class ClientHandler extends UntypedActor {
     } else {
       message = EVENT_NOT_WATCHED_X;
     }
-    Writer w = new Writer();
-    w.writeString(message + name);
-    w.writeSuccess(ok);
-    w.send(getSender(), getSelf());
+    
+    new Writer().writeString(message + name).writeSuccess(ok).send(getSender(), getSelf());
   }
   
   /**
@@ -284,17 +275,11 @@ public class ClientHandler extends UntypedActor {
     try {
       cmd.setInput(di);
       cmd.execute(dbContext);
-      Writer w = new Writer();
-      w.writeString(cmd.info());
-      w.writeSuccess(true);
-      w.send(getSender(), getSelf());
+      new Writer().writeString(cmd.info()).writeSuccess(true).send(getSender(), getSelf());
     } catch(final BaseXException ex) {
       di.flush();
 
-      Writer w = new Writer();
-      w.writeString(ex.getMessage());
-      w.writeSuccess(false);
-      w.send(getSender(), getSelf());
+      new Writer().writeString(ex.getMessage()).writeSuccess(false).send(getSender(), getSelf());
     }
   }
 
@@ -311,11 +296,8 @@ public class ClientHandler extends UntypedActor {
       final String msg = ex.getMessage();
       log.info("Query failed: {}, Error message: {}", cmd, msg);
       
-      Writer w = new Writer();
-      w.writeTerminator();
-      w.writeString(msg);
-      w.writeSuccess(false);
-      w.send(getSender(), getSelf());
+      new Writer().writeTerminator().writeString(msg).writeSuccess(false)
+        .send(getSender(), getSelf());
       return;
     }
 
@@ -327,16 +309,12 @@ public class ClientHandler extends UntypedActor {
       command.execute(dbContext, new EncodingOutput(w.getOutputStream()));
       info = command.info();
 
-      w.writeTerminator();
-      w.writeString(info);
-      w.writeSuccess(true);
+      w.writeTerminator().writeString(info).writeSuccess(true);
     } catch(final BaseXException ex) {
       info = ex.getMessage();
       if(info.startsWith(INTERRUPTED)) info = TIMEOUT_EXCEEDED;
 
-      w.writeTerminator();
-      w.writeString(info);
-      w.writeSuccess(false);
+      w.writeTerminator().writeString(info).writeSuccess(false);
     }
     w.send(getSender(), getSelf());
   }

@@ -31,10 +31,12 @@ public class Writer {
    * Write a string as UTF-8 encoded byte array. The string is followed
    * by a 0 byte to signal the end of the string.
    * @param text text to send
+   * @return this instance for method chaining
    */
-  public void writeString(final String text) {
+  public Writer writeString(final String text) {
     builder.append(ByteString.fromString(text));
     writeTerminator();
+    return this;
   }
   
   /**
@@ -50,16 +52,20 @@ public class Writer {
    * In case of successful execution write a 0 byte, otherwise write a
    * 1 byte.
    * @param success execution was successful
+   * @return this instance for method chaining
    */
-  public void writeSuccess(final boolean success) {
+  public Writer writeSuccess(final boolean success) {
     builder.putByte((byte) (success ? 0 : 1));
+    return this;
   }
   
   /**
    * Write the termination sign, which is currently a 0 byte.
+   * @return this instance for method chaining
    */
-  public void writeTerminator() {
+  public Writer writeTerminator() {
     builder.putByte((byte) 0);
+    return this;
   }
   
   /**
