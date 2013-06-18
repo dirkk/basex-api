@@ -12,8 +12,19 @@ import akka.io.*;
 import akka.io.Tcp.Bound;
 import akka.io.Tcp.CommandFailed;
 import akka.io.Tcp.Connected;
-import akka.io.Tcp.Received;
 
+/**
+ * This runs the event server. Clients can connect to this port and actively
+ * listen on the TCP/IP connection for an event to be thrown.
+ * 
+ * This is a rather bad architecture due to the old client/server API. It means
+ * opening a new thread for each event to listen to on the client side.
+ * 
+ * TODO: At the moment, no event notification is ever thrown.
+ *
+ * @author BaseX Team 2005-12, BSD License
+ * @author Dirk Kirsten
+ */
 public class EventActor extends UntypedActor {
   /** Listening address. */
   private InetSocketAddress addr;

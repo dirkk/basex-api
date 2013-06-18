@@ -1,13 +1,18 @@
 package org.basex.server;
 
-import org.basex.core.*;
-
 import akka.actor.*;
 import akka.event.*;
 import akka.io.Tcp.*;
 
+/**
+ * Handles incoming connections on the event server socket.
+ *
+ * @author BaseX Team 2005-12, BSD License
+ * @author Dirk Kirsten
+ */
 public class EventHandler extends UntypedActor {
   /** Logging adapter. */
+  @SuppressWarnings("unused")
   private final LoggingAdapter log = Logging.getLogger(getContext().system(), this);
   
   /**

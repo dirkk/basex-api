@@ -63,7 +63,7 @@ public class ServerActor extends UntypedActor {
       .tell(TcpMessage.bind(getSelf(), listening, 100), getSelf());
     
     getContext().actorOf(EventActor.mkProps(
-        new InetSocketAddress(listening.getAddress(), dbContext.mprop.num(dbContext.mprop.EVENTPORT))),
+        new InetSocketAddress(listening.getAddress(), dbContext.mprop.num(MainProp.EVENTPORT))),
         "events"
         );
   }

@@ -6,10 +6,14 @@ import org.basex.core.*;
 
 import akka.actor.*;
 import akka.event.*;
-import akka.io.*;
 import akka.io.Tcp.*;
-import akka.util.*;
 
+/**
+ * An actor, handling query instances on the server side.
+ *
+ * @author BaseX Team 2005-12, BSD License
+ * @author Dirk Kirsten
+ */
 public class QueryHandler extends UntypedActor {
   /** Query ID. */
   private final int id;
@@ -76,118 +80,137 @@ public class QueryHandler extends UntypedActor {
           close();
         }
       } catch(final IOException ex) {
-        ByteStringBuilder bb = new ByteStringBuilder();
-        bb.putByte((byte) 0);
-        bb.append(ByteString.fromString(ex.getMessage()));
-        bb.putByte((byte) 0);
-        respond(bb.result());
+        new Writer()
+          .writeTerminator()
+          .writeString(ex.getMessage())
+          .send(getSender(), getSelf());
       }
     } else {
       unhandled(msg);
     }
   }
 
+  /**
+   * A client wants to create a new query instance.
+   *
+   * @param reader incoming message reader
+   */
   private void newQuery(final Reader reader) {
     try {
-      final StringBuilder info = new StringBuilder();
       final String query = reader.getString();
       qp = new QueryListener(query, dbContext);
       // write log file
       log.info("Query: {}", query);
-      ByteStringBuilder bb = new ByteStringBuilder();
+      
       // send {ID}0
-      bb.append(ByteString.fromString(String.valueOf(id)));
-      bb.putByte((byte) 0);
       // send 0 as success flag
-      bb.putByte((byte) 0);
-      respond(bb.result());
+      new Writer()
+        .writeString(String.valueOf(id))
+        .writeSuccess(true)
+        .send(getSender(), getSelf());
 
     } catch(final Throwable ex) {
       log.error("New Query Error: {}", ex.getMessage());
     }
   }
   
+  /**
+   * Binds a value to a global variable.
+   * @param reader incoming message reader
+   * @throws IOException I/O exception
+   */
   private void bind(final Reader reader) throws IOException {
     final String key = reader.getString();
     final String val = reader.getString();
     final String typ = reader.getString();
     
     qp.bind(key, val, typ);
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    new Writer().writeTerminator().writeTerminator()
+      .send(getSender(), getSelf());
   }
 
+  /**
+   * Binds a value to the context item.
+   * @param reader incoming message reader
+   * @throws IOException I/O exception
+   */
   private void context(final Reader reader) throws IOException {
     final String val = reader.getString();
     final String typ = reader.getString();
     
     qp.context(val, typ);
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    new Writer().writeTerminator().writeTerminator()
+      .send(getSender(), getSelf());
   }
 
+  /**
+   * Sends the single items as strings, prefixed by a single byte (\x) that
+   * represents the Type ID. This command is called by the more() function
+   * of a client implementation.
+   * @throws IOException I/O exception
+   */
   private void results() throws IOException {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    qp.execute(true, bb.asOutputStream(), true, false);
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    Writer w = new Writer();
+    qp.execute(true, w.getOutputStream(), true, false);
+    w.writeTerminator().writeTerminator()
+      .send(getSender(), getSelf());
   }
 
+  /**
+   * Executes the query and sends all results as a single string.
+   * @throws IOException I/O exception
+   */
   private void exec() throws IOException {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    qp.execute(false, bb.asOutputStream(), true, false);
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    Writer w = new Writer();
+    qp.execute(false, w.getOutputStream(), true, false);
+    w.writeTerminator().writeTerminator()
+      .send(getSender(), getSelf());
   }
 
+  /**
+   * Returns all resulting items as strings, prefixed by the XDM Meta Data.
+   * This command is e. g. used by the XQJ API.
+   * @throws IOException I/O exception
+   */
   private void full() throws IOException {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    qp.execute(true, bb.asOutputStream(), true, true);
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    Writer w = new Writer();
+    qp.execute(true, w.getOutputStream(), true, true);
+    w.writeTerminator().writeTerminator()
+      .send(getSender(), getSelf());
   }
 
+  /**
+   * Sends the query info.
+   */
   private void info() {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.append(ByteString.fromString(qp.info()));
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    new Writer().writeString(qp.info())
+        .writeTerminator().send(getSender(), getSelf());
   }
 
+  /**
+   * Sends the serialization options.
+   * @throws IOException I/O Exception
+   */
   private void options() throws IOException {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.append(ByteString.fromString(qp.options()));
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    new Writer().writeString(qp.options()).writeTerminator()
+      .send(getSender(), getSelf());
   }
 
+  /**
+   * Sends {@code true} if the query may perform updates.
+   * @throws IOException I/O Exception
+   */
   private void updating() throws IOException {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.append(ByteString.fromString(Boolean.toString(qp.updating())));
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    new Writer().writeString(Boolean.toString(qp.updating()))
+      .writeTerminator().send(getSender(), getSelf());
   }
 
+  /**
+   * Closes the query and stops this actor.
+   */
   private void close() {
-    ByteStringBuilder bb = new ByteStringBuilder();
-    bb.putByte((byte) 0);
-    bb.putByte((byte) 0);
-    respond(bb.result());
+    new Writer().writeTerminator().writeTerminator()
+      .send(getSender(), getSelf());
     getContext().stop(getSelf());
   }
-
-  private void respond(final ByteString payload) {
-    getSender().tell(TcpMessage.write(payload), getSelf());
-  }
-  
 }
