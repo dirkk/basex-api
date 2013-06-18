@@ -8,8 +8,8 @@ import org.basex.core.*;
 import org.basex.core.cmd.*;
 import org.basex.core.parse.*;
 import org.basex.io.in.*;
-import org.basex.io.out.*;
 import org.basex.query.*;
+import org.basex.server.messages.*;
 
 import scala.concurrent.duration.*;
 
@@ -18,6 +18,7 @@ import akka.event.*;
 import akka.io.Tcp.ConnectionClosed;
 import akka.io.Tcp.Received;
 import akka.japi.*;
+import akka.routing.*;
 import akka.util.*;
 
 import static org.basex.util.Token.md5;
@@ -50,6 +51,8 @@ public class ClientHandler extends UntypedActor {
   protected ActorRef event;
   /** Interface for core. */
   protected ClientListener lst;
+  /** Worker pool to do blocking command execution. */
+  protected ActorRef cmdWorker;
   
   /**
    * Create Props for the client handler actor.
@@ -68,6 +71,9 @@ public class ClientHandler extends UntypedActor {
     log = Logging.getLogger(getContext().system(), this);
     dbContext = new Context(ctx, null);
     lst = new ClientListener(dbContext, null);
+    cmdWorker = getContext().actorOf(CommandActor.mkProps(dbContext)
+        .withRouter(new RoundRobinRouter(10)),
+        "CmdExec");
   }
   
   @Override
@@ -104,6 +110,8 @@ public class ClientHandler extends UntypedActor {
       }
     } else if (msg instanceof ConnectionClosed) {
       connectionClosed((ConnectionClosed) msg);
+    } else {
+      unhandled(msg);
     }
   }
   
@@ -180,9 +188,8 @@ public class ClientHandler extends UntypedActor {
    * Creates a database.
    * @param name database name
    * @param input input stream
-   * @throws IOException I/O exception
    */
-  protected void create(final String name, final InputStream input) throws IOException {
+  protected void create(final String name, final InputStream input) {
     execute(new CreateDB(name), input);
   }
 
@@ -190,9 +197,8 @@ public class ClientHandler extends UntypedActor {
    * Adds a document to a database.
    * @param path document path
    * @param input input stream
-   * @throws IOException I/O exception
    */
-  protected void add(final String path, final InputStream input) throws IOException {
+  protected void add(final String path, final InputStream input) {
     execute(new Add(path), input);
   }
 
@@ -200,9 +206,8 @@ public class ClientHandler extends UntypedActor {
    * Replace a document in a database.
    * @param path document path
    * @param input input stream
-   * @throws IOException I/O exception
    */
-  protected void replace(final String path, final InputStream input) throws IOException {
+  protected void replace(final String path, final InputStream input) {
     execute(new Replace(path), input);
   }
 
@@ -210,9 +215,8 @@ public class ClientHandler extends UntypedActor {
    * Stores raw data in a database.
    * @param path document path
    * @param input input stream
-   * @throws IOException I/O exception
    */
-  protected void store(final String path, final InputStream input) throws IOException {
+  protected void store(final String path, final InputStream input) {
     execute(new Store(path), input);
   }
 
@@ -223,7 +227,7 @@ public class ClientHandler extends UntypedActor {
   protected void watch(final String name) {
     if(!addressSend) {
       new Writer()
-        .writeString(Integer.toString(dbContext.mprop.num(dbContext.mprop.EVENTPORT)))
+        .writeString(Integer.toString(dbContext.mprop.num(MainProp.EVENTPORT)))
         .writeString(getSelf().path().name())
         .send(getSender(), getSelf());
       addressSend = true;
@@ -279,27 +283,25 @@ public class ClientHandler extends UntypedActor {
     queries.put(newId, query);
     query.forward(msg, getContext());
   }
-  
+
   /**
    * Executes the specified command.
    * @param cmd command to be executed
    * @param input encoded input stream
-   * @throws IOException I/O exception
    */
-  protected void execute(final Command cmd, final InputStream input) throws IOException {
-    log.info("Executed command: {}", cmd);
+  protected void execute(final Command cmd, final InputStream input) {
     final DecodingInput di = new DecodingInput(input);
-    try {
-      cmd.setInput(di);
-      cmd.execute(dbContext);
-      new Writer().writeString(cmd.info()).writeSuccess(true).send(getSender(), getSelf());
-    } catch(final BaseXException ex) {
-      di.flush();
-
-      new Writer().writeString(ex.getMessage()).writeSuccess(false).send(getSender(), getSelf());
-    }
+    cmd.setInput(di);
+    cmdWorker.tell(new CommandMessage(cmd), getSender());
   }
 
+  /**
+   * Parse the command and pass the command execution on to the
+   * {@link ClientHandler#cmdWorker} worker pool for blocking command
+   * execution.
+   *
+   * @param reader incoming message reader
+   */
   protected void command(final Reader reader) {
     Command command;
     String cmd = reader.getString();
@@ -318,22 +320,7 @@ public class ClientHandler extends UntypedActor {
       return;
     }
 
-    // execute command and send {RESULT}
-    String info;
-    Writer w = new Writer();
-    try {
-      // run command
-      command.execute(dbContext, new EncodingOutput(w.getOutputStream()));
-      info = command.info();
-
-      w.writeTerminator().writeString(info).writeSuccess(true);
-    } catch(final BaseXException ex) {
-      info = ex.getMessage();
-      if(info.startsWith(INTERRUPTED)) info = TIMEOUT_EXCEEDED;
-
-      w.writeTerminator().writeString(info).writeSuccess(false);
-    }
-    w.send(getSender(), getSelf());
+    cmdWorker.tell(new CommandMessage(command, true), getSender());
   }
   
   /**

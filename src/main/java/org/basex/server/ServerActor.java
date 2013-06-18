@@ -59,8 +59,8 @@ public class ServerActor extends UntypedActor {
   
   @Override
   public void preStart() throws Exception {
-    final ActorRef tcp = Tcp.get(getContext().system()).manager();
-    tcp.tell(TcpMessage.bind(getSelf(), listening, 100), getSelf());
+    Tcp.get(getContext().system()).manager()
+      .tell(TcpMessage.bind(getSelf(), listening, 100), getSelf());
     
     getContext().actorOf(EventActor.mkProps(
         new InetSocketAddress(listening.getAddress(), dbContext.mprop.num(dbContext.mprop.EVENTPORT))),
@@ -91,6 +91,10 @@ public class ServerActor extends UntypedActor {
       final ActorRef handler = getContext().actorOf(ClientHandler.mkProps(dbContext));
       getSender().tell(TcpMessage.register(handler), getSelf());
       handler.tell("connect", getSender());
+    } else if (msg instanceof Terminated) {
+      log.error("The actor {} terminated.", ((Terminated) msg).actor().path());
+    } else {
+      unhandled(msg);
     }
   }
 }

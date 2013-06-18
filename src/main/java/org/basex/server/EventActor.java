@@ -56,6 +56,8 @@ public class EventActor extends UntypedActor {
       log.info("Connection from {}", conn.remoteAddress());
       final ActorRef handler = getContext().actorOf(EventHandler.mkProps());
       getSender().tell(TcpMessage.register(handler), getSelf());
+    } else {
+      unhandled(msg);
     }
   }
 }

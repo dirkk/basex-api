@@ -82,6 +82,8 @@ public class QueryHandler extends UntypedActor {
         bb.putByte((byte) 0);
         respond(bb.result());
       }
+    } else {
+      unhandled(msg);
     }
   }
 
