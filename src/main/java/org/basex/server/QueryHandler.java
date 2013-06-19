@@ -1,8 +1,18 @@
 package org.basex.server;
 
+import static org.basex.core.Text.*;
+import static org.basex.io.serial.SerializerProp.*;
+import static org.basex.query.util.Err.*;
+
 import java.io.*;
 
 import org.basex.core.*;
+import org.basex.io.out.*;
+import org.basex.io.serial.*;
+import org.basex.query.*;
+import org.basex.query.iter.*;
+import org.basex.query.value.item.*;
+import org.basex.util.*;
 
 import akka.actor.*;
 import akka.event.*;
@@ -21,8 +31,20 @@ public class QueryHandler extends UntypedActor {
   private final Context dbContext;
   /** Logging adapter. */
   private final LoggingAdapter log = Logging.getLogger(getContext().system(), this);
-  /** Query Processor. */
-  private QueryListener qp;
+
+  /** Performance. */
+  final Performance perf = new Performance();
+  /** Query info. */
+  private final QueryInfo qi = new QueryInfo();
+  /** Query string. */
+  private String query;
+  
+  /** Query processor. */
+  private QueryProcessor qp;
+  /** Serialization options. */
+  private SerializerProp options;
+  /** Parsing flag. */
+  private boolean parsed;
   
   /**
    * Create Props for the client handler actor.
@@ -97,8 +119,7 @@ public class QueryHandler extends UntypedActor {
    */
   private void newQuery(final Reader reader) {
     try {
-      final String query = reader.getString();
-      qp = new QueryListener(query, dbContext);
+      query = reader.getString();
       // write log file
       log.info("Query: {}", query);
       
@@ -124,7 +145,11 @@ public class QueryHandler extends UntypedActor {
     final String val = reader.getString();
     final String typ = reader.getString();
     
-    qp.bind(key, val, typ);
+    try {
+      init().bind(key, val, typ);
+    } catch(QueryException ex) {
+      throw new BaseXException(ex);
+    }
     new Writer().writeTerminator().writeTerminator()
       .send(getSender(), getSelf());
   }
@@ -138,7 +163,11 @@ public class QueryHandler extends UntypedActor {
     final String val = reader.getString();
     final String typ = reader.getString();
     
-    qp.context(val, typ);
+    try {
+      init().context(val, typ);
+    } catch(QueryException ex) {
+      throw new BaseXException(ex);
+    }
     new Writer().writeTerminator().writeTerminator()
       .send(getSender(), getSelf());
   }
@@ -151,7 +180,7 @@ public class QueryHandler extends UntypedActor {
    */
   private void results() throws IOException {
     Writer w = new Writer();
-    qp.execute(true, w.getOutputStream(), true, false);
+    execute(true, w.getOutputStream(), true, false);
     w.writeTerminator().writeTerminator()
       .send(getSender(), getSelf());
   }
@@ -162,7 +191,7 @@ public class QueryHandler extends UntypedActor {
    */
   private void exec() throws IOException {
     Writer w = new Writer();
-    qp.execute(false, w.getOutputStream(), true, false);
+    execute(false, w.getOutputStream(), true, false);
     w.writeTerminator().writeTerminator()
       .send(getSender(), getSelf());
   }
@@ -174,7 +203,7 @@ public class QueryHandler extends UntypedActor {
    */
   private void full() throws IOException {
     Writer w = new Writer();
-    qp.execute(true, w.getOutputStream(), true, true);
+    execute(true, w.getOutputStream(), true, true);
     w.writeTerminator().writeTerminator()
       .send(getSender(), getSelf());
   }
@@ -191,8 +220,8 @@ public class QueryHandler extends UntypedActor {
    * Sends the serialization options.
    * @throws IOException I/O Exception
    */
-  private void options() throws IOException {
-    new Writer().writeString(qp.options()).writeTerminator()
+  private void options() throws IOException {    
+    new Writer().writeString(options.toString()).writeTerminator()
       .send(getSender(), getSelf());
   }
 
@@ -201,7 +230,7 @@ public class QueryHandler extends UntypedActor {
    * @throws IOException I/O Exception
    */
   private void updating() throws IOException {
-    new Writer().writeString(Boolean.toString(qp.updating()))
+    new Writer().writeString(Boolean.toString(parse().updating))
       .writeTerminator().send(getSender(), getSelf());
   }
 
@@ -212,5 +241,107 @@ public class QueryHandler extends UntypedActor {
     new Writer().writeTerminator().writeTerminator()
       .send(getSender(), getSelf());
     getContext().stop(getSelf());
+  }
+  
+
+  /**
+   * Executes the query.
+   * @param iter iterative evaluation
+   * @param out output stream
+   * @param enc encode stream
+   * @param full return full type information
+   * @throws IOException I/O Exception
+   */
+  private void execute(final boolean iter, final OutputStream out, final boolean enc,
+      final boolean full) throws IOException {
+
+    try {
+      try {
+        // parses the query and registers the process
+        dbContext.register(parse());
+
+        // create serializer
+        qp.compile();
+        qi.cmpl = perf.time();
+        final Iter ir = qp.iter();
+        qi.evlt = perf.time();
+        if(options == null) options = parse().ctx.serParams(false);
+        final boolean wrap = !options.get(S_WRAP_PREFIX).isEmpty();
+
+        // iterate through results
+        final PrintOutput po = PrintOutput.get(enc ? new EncodingOutput(out) : out);
+        if(iter && wrap) po.write(1);
+
+        final Serializer ser = Serializer.get(po, full ? null : options);
+        int c = 0;
+        for(Item it; (it = ir.next()) != null;) {
+          if(iter && !wrap) {
+            if(full) {
+              po.write(it.xdmInfo());
+            } else {
+              po.write(it.typeId().asByte());
+            }
+            ser.reset();
+          }
+          ser.serialize(it);
+          if(iter && !wrap) {
+            po.flush();
+            out.write(0);
+          }
+          c++;
+        }
+        ser.close();
+        if(iter && wrap) out.write(0);
+        qi.srlz = perf.time();
+      } catch(final QueryException ex) {
+        throw new BaseXException(ex);
+      } catch(final StackOverflowError ex) {
+        Util.debug(ex);
+        throw new BaseXException(BASX_STACKOVERFLOW.desc);
+      } catch(final ProcException ex) {
+        throw new BaseXException(TIMEOUT_EXCEEDED);
+      }
+    } finally {
+      // close processor and unregisters the process
+      if(qp != null) {
+        qp.close();
+        if(parsed) {
+          dbContext.unregister(qp);
+          parsed = false;
+        }
+        qp = null;
+      }
+    }
+  }
+
+  /**
+   * Initializes the query.
+   * @return query processor
+   * @throws IOException I/O Exception
+   */
+  private QueryProcessor parse() throws IOException {
+    if(!parsed) {
+      try {
+        perf.time();
+        init().parse();
+        qi.pars = perf.time();
+        parsed = true;
+      } catch(final QueryException ex) {
+        throw new BaseXException(ex);
+      }
+    }
+    return qp;
+  }
+  
+  /**
+   * Returns an instance of the query processor.
+   * @return query processor
+   */
+  private QueryProcessor init() {
+    if(parsed || qp == null) {
+      qp = new QueryProcessor(query, dbContext);
+      parsed = false;
+    }
+    return qp;
   }
 }
